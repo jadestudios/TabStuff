@@ -69,6 +69,8 @@ public class Tab {
 
         //TODO:Use StatisticsData instead.
 
+        //TODO: Name is also changed
+
 
     }
 
@@ -95,7 +97,7 @@ public class Tab {
                 Text suffix = LiteralText.builder(" - Deaths: "+ deathScore).build();
 
                 Team playerTeam = Team.builder().prefix(prefix).suffix(suffix).name(teamName.toPlain()).build();
-                playerTeam.addMember(playerName);
+                //playerTeam.addMember(playerName);
 
                 this.scoreboard.registerTeam(playerTeam);
                 logger.info("[Tab] Team added");
@@ -124,7 +126,7 @@ public class Tab {
         Optional<Team> maybeTeam = this.scoreboard.getTeam(teamName.toPlain());
         if(maybeTeam.isPresent()){
             Team team = maybeTeam.get();
-            team.removeMember(playerName);
+            //team.removeMember(playerName);
             team.unregister();
             logger.info("[Tab] Team removed");
         }
