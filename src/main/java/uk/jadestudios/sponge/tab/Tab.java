@@ -2,9 +2,9 @@ package uk.jadestudios.sponge.tab;
 
 import com.google.inject.Inject;
 import org.slf4j.Logger;
-import org.spongepowered.api.Server;
 import org.spongepowered.api.Sponge;
 import org.spongepowered.api.entity.living.player.Player;
+import org.spongepowered.api.entity.living.player.tab.TabListEntry;
 import org.spongepowered.api.event.entity.living.humanoid.player.RespawnPlayerEvent;
 import org.spongepowered.api.event.game.state.GameStartedServerEvent;
 import org.spongepowered.api.event.Listener;
@@ -14,11 +14,10 @@ import org.spongepowered.api.scheduler.Task;
 import org.spongepowered.api.scoreboard.*;
 import org.spongepowered.api.scoreboard.critieria.Criteria;
 import org.spongepowered.api.scoreboard.objective.Objective;
-import org.spongepowered.api.text.LiteralText;
 import org.spongepowered.api.text.Text;
+import org.spongepowered.api.text.format.TextColors;
 
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 
@@ -35,167 +34,182 @@ public class Tab {
 
     @Inject
     private Logger logger;
-    private Server server;
-    private Scoreboard scoreboard;
-
-
 
     @Listener
     public void onServerStart(GameStartedServerEvent event) {
-        logger.info("[Tab] Activated!");
-        if(Sponge.isServerAvailable()){
-            this.server = Sponge.getServer();
-        }
+        logger.info("[Tab] Activated! 1.0.16");
 
-        Optional<Scoreboard> maybeScoreboard = this.server.getServerScoreboard();
+        Optional<Scoreboard> maybeScoreboard = Sponge.getServer().getServerScoreboard();
 
-        if(maybeScoreboard.isPresent()){
+        if (maybeScoreboard.isPresent()) {
             logger.info("[Tab] ScoreBoard found");
-            this.scoreboard = maybeScoreboard.get();
-            Optional<Objective> maybeObjective = this.scoreboard.getObjective("Deaths");
-            if(!maybeObjective.isPresent()){
+            Scoreboard scoreboard = maybeScoreboard.get();
+            Optional<Objective> maybeObjective = scoreboard.getObjective("Deaths");
+            if (!maybeObjective.isPresent()) {
                 Objective deaths = Objective.builder().name("Deaths").criterion(Criteria.DEATHS).build();
-                this.scoreboard.addObjective(deaths);
+                scoreboard.addObjective(deaths);
             }
-        }else{
-            this.scoreboard = null;
         }
-
-        Task.Builder task = Task.builder();
-        task.execute(() -> updatePingAll()).async().delay(5, TimeUnit.SECONDS).interval(5, TimeUnit.SECONDS).name("[Tab] Update Ping").submit(this);
-
-        //TODO: Check and add Death deathcount objective to scoreboard
-        //Assume scoreboard reference is immutable
-
-        //TODO:Use StatisticsData instead.
-
-        //TODO: Name is also changed
-
-
     }
 
 
-
     @Listener
-    public void onPlayerJoin(ClientConnectionEvent.Join event){
+    public void onPlayerJoin(ClientConnectionEvent.Join event) {
         logger.info("[Tab] Player Joined");
-        if(this.scoreboard == null){return;}
-        Player player = event.getTargetEntity();
 
-        Optional<Objective> maybeObjective = this.scoreboard.getObjective("Deaths");
-        if(maybeObjective.isPresent()){
-            logger.info("[Tab] Found Objective");
-            Objective deaths = maybeObjective.get();
-            Text playerName = Text.builder(player.getName()).build();
-            Text teamName = Text.builder("jstb."+ player.getName()).build();
-
-            Optional<Score> maybeDeath = deaths.getScore(playerName);
-            if(maybeDeath.isPresent()){
-                logger.info("[Tab] Found Deaths");
-                int deathScore = maybeDeath.get().getScore();
-                Text prefix = LiteralText.builder("["+player.getConnection().getLatency()+"ms] ").build();
-                Text suffix = LiteralText.builder(" - Deaths: "+ deathScore).build();
-
-                Team playerTeam = Team.builder().prefix(prefix).suffix(suffix).name(teamName.toPlain()).build();
-                //playerTeam.addMember(playerName);
-
-                this.scoreboard.registerTeam(playerTeam);
-                logger.info("[Tab] Team added");
-
-            }
+        if(Sponge.getServer().getOnlinePlayers().size() <= 1){
+            //Creates a new task when at least one person is on
+            Task.Builder task = Task.builder();
+            task.execute(() -> updateAll()).async().delay(5, TimeUnit.SECONDS).interval(5, TimeUnit.SECONDS).name("[Tab]UpdatePing").submit(this);
         }
 
-        //TODO: Create new team where Prefix = PING and suffix = DeathCount
-        //TODO: Add player to said team
-        //TODO: Register team to scoreboard
-
-        for (Player p: Sponge.getServer().getOnlinePlayers()) {
-            p.setScoreboard((this.scoreboard));
-        }
-
+        //Adds everyone to player TabList
+        updateAll();
     }
 
     @Listener
-    public void onPlayerDisconnect(ClientConnectionEvent.Disconnect event){
+    public void onPlayerDisconnect(ClientConnectionEvent.Disconnect event) {
         logger.info("[Tab] Player leave");
-        if(this.scoreboard == null){return;}
         Player player = event.getTargetEntity();
-        Text playerName = Text.builder(player.getName()).build();
-        Text teamName = Text.builder("jstb."+ player.getName()).build();
-
-        Optional<Team> maybeTeam = this.scoreboard.getTeam(teamName.toPlain());
-        if(maybeTeam.isPresent()){
-            Team team = maybeTeam.get();
-            //team.removeMember(playerName);
-            team.unregister();
-            logger.info("[Tab] Team removed");
+        if(Sponge.getServer().getOnlinePlayers().size() <= 1){
+            //Finds the updateAll task and kills it when no one is on
+            for (Task t: Sponge.getScheduler().getScheduledTasks(this)) {
+                if(t.getName().equals("[Tab]UpdatePing")){
+                    t.cancel();
+                }
+            }
+        }
+        for (Player p : Sponge.getServer().getOnlinePlayers()) {
+            p.getTabList().removeEntry(player.getUniqueId());
         }
 
-        for (Player p: Sponge.getServer().getOnlinePlayers()) {
-            p.setScoreboard((this.scoreboard));
-        }
-
-
-        //TODO: Unregister Team
+        //Cuz when player leaves, it leaves the tablist
     }
 
     @Listener
-    public void onPlayerDeath(RespawnPlayerEvent event){
+    public void onPlayerDeath(RespawnPlayerEvent event) {
         logger.info("[Tab] Player died");
-        if (!event.isDeath())return;
+        if (!event.isDeath()) {
+            return;
+        }
 
-        if(this.scoreboard == null){return;}
-        Player player = event.getTargetEntity();
-        Text playerName = Text.builder(player.getName()).build();
-        Text teamName = Text.builder("jstb."+ player.getName()).build();
+        //Only when player dies when tab might not have anything
+        updateAll();
+    }
 
-        Optional<Objective> maybeObjective = this.scoreboard.getObjective("Deaths");
-        if(maybeObjective.isPresent()){
+
+    //Private Methods below this point ==================================================
+    //
+
+    /**
+     * Updates everyone's tablist for everyone
+     */
+    private void updateAll() {
+        logger.info("[Tab] Updating Everything");
+
+        for (Player p : Sponge.getServer().getOnlinePlayers()) {
+            for (Player s : Sponge.getServer().getOnlinePlayers()) {
+                propagatePlayer(p,s);
+                propagatePlayer(s,p);
+            }
+            propagatePlayer(p,p);
+            //TODO: ADD Header Footer for each p here
+        }
+    }
+
+    /**
+     * Propagates the info of thisPlayer to thatPlayer
+     * info in this case is the new display name
+     * @param thisPlayer Sponge Entity Player
+     * @param thatPlayer Sponge Entity Player
+     */
+    private void propagatePlayer(Player thisPlayer, Player thatPlayer) {
+        Optional<TabListEntry> maybeEntry = thatPlayer.getTabList().getEntry(thisPlayer.getUniqueId());
+        if (maybeEntry.isPresent()) {
+            TabListEntry entry = maybeEntry.get();
+            entry.setDisplayName(Text.join(getPing(thisPlayer), Text.of(thisPlayer.getName()), getDeaths(thisPlayer)));
+            logger.info("Added all to me");
+        } else {
+            TabListEntry entry = createTabListEntry(thisPlayer, thatPlayer);
+            entry.setDisplayName(Text.join(getPing(thisPlayer), Text.of(thisPlayer.getName()), getDeaths(thisPlayer)));
+            thatPlayer.getTabList().addEntry(entry);
+            logger.info("Added all to me 2");
+        }
+    }
+
+    /**
+     * Creates a tabListEntry
+     * This method does not add the entry to the tabList
+     * Nor does it set the displayName
+     *
+     * @param tabListPlayer Player to create a TabListEntry of
+     * @param tabListOwner  Player to apply the TabListEntry to
+     * @return TabListEntry of tabListPlayer with .list() set to tabListOwner
+     */
+    private TabListEntry createTabListEntry(Player tabListPlayer, Player tabListOwner) {
+        TabListEntry entry = TabListEntry.builder()
+                .latency(tabListPlayer.getConnection().getLatency())
+                .profile(tabListPlayer.getProfile())
+                .list(tabListOwner.getTabList())
+                .gameMode(tabListPlayer.gameMode().get())
+                .build();
+        return entry;
+    }
+
+    /**
+     * Gets ping of player as a Sponge.Text
+     *
+     * @param player Sponge Entity Player
+     * @return Sponge API Text: "[123ms]" where alpha-numeric portion is colored
+     */
+    private Text getPing(Player player) {
+        int ping = player.getConnection().getLatency();
+        Text prefix = Text.of("[");
+        Text suffix = Text.of("]");
+        Text center;
+
+        if (ping < 100) {
+            center = Text.builder(player.getConnection().getLatency() + "ms").color(TextColors.DARK_GREEN).build();
+        } else if (ping < 150) {
+            center = Text.builder(player.getConnection().getLatency() + "ms").color(TextColors.YELLOW).build();
+        } else {
+            center = Text.builder(player.getConnection().getLatency() + "ms").color(TextColors.DARK_RED).build();
+        }
+
+        return Text.join(prefix,center,suffix);
+    }
+
+
+    /**
+     * Gets DeathCount from ScoreBoard as a Sponge.Text
+     *
+     * @param player Sponge Entity Player
+     * @return Sponge API Text: " -- Deaths: [DEATHCOUNT]"
+     */
+    private Text getDeaths(Player player) {
+        Optional<Scoreboard> maybeScoreboard = Sponge.getServer().getServerScoreboard();
+        Optional<Objective> maybeObjective = maybeScoreboard.get().getObjective("Deaths");
+        return Text.of(" -- Deaths: " + getObjectiveScore(maybeObjective, Text.of(player.getName())));
+    }
+
+    /**
+     * Gets the score from an Optional objective
+     *
+     * @param maybeObjective Optional<Objective>
+     * @param playerName     Sponge API Text
+     * @return Objective score of player (playerName) else it returns 0 on fail
+     */
+    private int getObjectiveScore(Optional<Objective> maybeObjective, Text playerName) {
+        int score = 0;
+        if (maybeObjective.isPresent()) {
             logger.info("[Tab] Found Objective");
-            Objective deaths = maybeObjective.get();
-            Optional<Score> maybeDeath = deaths.getScore(playerName);
-            if(maybeDeath.isPresent()){
-                logger.info("[Tab] Found Deaths");
-                int deathScore = maybeDeath.get().getScore();
-                Optional<Team> maybeTeam = this.scoreboard.getTeam(teamName.toPlain());
-                if(maybeTeam.isPresent()){
-                    Team team = maybeTeam.get();
-                    Text suffix = LiteralText.builder(" - Deaths: "+ deathScore).build();
-                    team.setSuffix(suffix);
-                    logger.info("[Tab] Team updated");
-                }
+            Objective objective = maybeObjective.get();
+            Optional<Score> maybeScore = objective.getScore(playerName);
+            if (maybeScore.isPresent()) {
+                logger.info("[Tab] Found Score");
+                score = maybeScore.get().getScore();
             }
         }
-
-        for (Player p: Sponge.getServer().getOnlinePlayers()) {
-            p.setScoreboard((this.scoreboard));
-        }
-
-        //TODO: Updates team suffix
-
-
+        return score;
     }
-
-    public void updatePingAll(){
-        logger.info("[Tab] Updating ping");
-        Set<Team> teams = this.scoreboard.getTeams();
-        //TODO: Change color of ping from green to red
-        for (Team team: teams) {
-            if(team.getName().contains("jstb.")){
-                String playerName = team.getName().substring(5);
-                Optional<Player> maybePlayer = Sponge.getServer().getPlayer(playerName);
-                if(maybePlayer.isPresent()){
-                    Player player = maybePlayer.get();
-                    Text prefix = LiteralText.builder("["+player.getConnection().getLatency()+"ms] ").build();
-                    team.setPrefix(prefix);
-                    logger.info("[Tab] Ping updated");
-                }
-            }
-        }
-
-        for (Player p: Sponge.getServer().getOnlinePlayers()) {
-            p.setScoreboard((this.scoreboard));
-        }
-    }
-
 }
